@@ -40,6 +40,18 @@ import {
 const logger = pino({ level: 'silent' })
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+import { exec } from 'child_process'
+
+// ✅ استخراج الجلسة من SESSION_ID
+if (process.env.SESSION_ID) {
+  try {
+    fs.writeFileSync('session.tar.gz', Buffer.from(process.env.SESSION_ID, 'base64'))
+    exec('tar -xzf session.tar.gz')
+    console.log('✅ تم استخراج الجلسة')
+  } catch (e) {
+    console.log('❌ فشل:', e.message)
+  }
+}
 // ✅ المتغيرات العامة
 if (!global.db) global.db = { data: { chats: {}, users: {} } }
 if (!global.db.data.chats) global.db.data.chats = {}
