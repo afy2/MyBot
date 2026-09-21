@@ -1,0 +1,617 @@
+// ═══════════════════════════════════════════════════════
+// ⚡ 𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 - Main Entry
+// ═══════════════════════════════════════════════════════
+
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} from '@whiskeysockets/baileys'
+import { Boom } from '@hapi/boom'
+import pino from 'pino'
+import qrcode from 'qrcode-terminal'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+import {
+  OWNER_NUMBER, BOT_NAME, BOT_NAME_SHORT,
+  BOT_IMAGE, PREFIX, SESSION_DIR, SUB_BOTS_DIR,
+  CHANNEL_LINK, OWNER_CONTACT, OWNER_NAME
+} from './config.js'
+
+import {
+  COMMANDS, matchCommand, buildMenu,
+  buildSections, getSectionContent,
+  handleWelcome, handleWelcomeToggle
+} from './commands.js'
+
+import {
+  isAdmin, isBotAdmin, getMentioned,
+  kickMember, promoteMember, demoteMember,
+  muteGroup, unmuteGroup, tagAll,
+  getGroupLink, revokeLink, groupInfo
+} from './admin.js'
+
+const logger = pino({ level: 'silent' })
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+if (!global.db) global.db = { data: { chats: {}, users: {} } }
+if (!global.db.data.chats) global.db.data.chats = {}
+if (!global.db.data.users) global.db.data.users = {}
+
+if (!fs.existsSync(SUB_BOTS_DIR)) fs.mkdirSync(SUB_BOTS_DIR)
+
+const activeBots = new Map()
+const pendingCodes = new Map()
+let isReconnecting = false
+let reconnectCount = 0
+
+async function startBot() {
+  console.log(`\n🚀 جاري بدء ${BOT_NAME}...\n`)
+
+  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR)
+  const { version } = await fetchLatestBaileysVersion()
+
+  const sock = makeWASocket({
+    version,
+    logger,
+    auth: state,
+    browser: [BOT_NAME_SHORT, 'Chrome', '2.0.0'],
+    markOnlineOnConnect: true,
+    syncFullHistory: false,
+    generateHighQualityLinkPreview: false
+  })
+
+  sock.ev.on('creds.update', saveCreds)
+
+  let qrShown = false
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update
+
+    if (qr && !sock.authState.creds.registered) {
+      if (!qrShown) {
+        qrShown = true
+        console.log('\n📱 امسح QR Code من واتساب:\n')
+      }
+      qrcode.generate(qr, { small: true })
+      console.log('\n⚠️ صالح 30-40 ثانية\n')
+    }
+
+    if (connection === 'close') {
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      console.log('⚠️ انقطع:', lastDisconnect?.error?.message)
+
+      if (reason === DisconnectReason.loggedOut) {
+        console.log('❌ خروج — امسح session')
+        return
+      }
+
+      if (!isReconnecting) {
+        isReconnecting = true
+        const waitTime = Math.min(reconnectCount * 10000, 120000)
+        reconnectCount++
+        setTimeout(() => {
+          isReconnecting = false
+          startBot()
+        }, waitTime)
+      }
+    }
+    else if (connection === 'open') {
+      reconnectCount = 0
+      console.log('\n╔════════════════════════════════╗')
+      console.log(`║  ✅ ${BOT_NAME} شغال!`)
+      console.log('╚════════════════════════════════╝')
+      console.log(`📱 ${sock.user.id}\n`)
+    }
+  })
+
+  sock.ev.on('group-participants.update', async (event) => {
+    try {
+      await handleWelcome(sock, event, global.db)
+    } catch (e) {}
+  })
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return
+    const msg = messages[0]
+    if (!msg.message) return
+
+    const from = msg.key.remoteJid
+    const isGroup = from.endsWith('@g.us')
+
+    const text = msg.message.conversation
+      || msg.message.extendedTextMessage?.text
+      || msg.message.imageMessage?.caption
+      || msg.message.videoMessage?.caption
+      || ''
+
+    // ✅ معالجة الأزرار
+    let buttonId = null
+    if (msg.message?.buttonsResponseMessage) {
+      buttonId = msg.message.buttonsResponseMessage.selectedButtonId
+    } else if (msg.message?.templateButtonReplyMessage) {
+      buttonId = msg.message.templateButtonReplyMessage.selectedId
+    } else if (msg.message?.interactiveResponseMessage) {
+      const ir = msg.message.interactiveResponseMessage
+      if (ir.nativeFlowResponseMessage) {
+        try {
+          const params = JSON.parse(ir.nativeFlowResponseMessage.paramsJson)
+          buttonId = params.id
+        } catch {}
+      }
+    }
+
+   if (!text && !buttonId) return
+
+    const senderJid = msg.key.participant || msg.key.remoteJid
+    const senderNum = senderJid.split('@')[0].split(':')[0]
+    const isOwner = [
+      senderNum === OWNER_NUMBER,
+      senderJid.includes(OWNER_NUMBER),
+      msg.key.fromMe,
+      senderNum.endsWith(OWNER_NUMBER)
+    ].some(v => v === true)
+
+    console.log(`📩 ${senderNum}: ${text} | مالك: ${isOwner}`)
+
+// ✅ عرّف cmdText هنا
+const cmdText = text.replace(/^[.\/!#*]/, '').trim().toLowerCase()
+
+try {  
+     
+// ═══════════════════════════════════════════════════
+// ✅ معالجة الأزرار
+// ═══════════════════════════════════════════════════
+if (buttonId) {
+  // 📋 اختر القسم — قائمة 5 أقسام
+  if (buttonId === 'الاقسام' || buttonId === 'الأوامر' || buttonId === 'commands') {
+    try {
+      return sock.sendMessage(from, {
+        text: '📋 *اختر قسم من القائمة:*',
+        footer: '𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026',
+        sections: buildSections(),
+        buttonText: '📋 اختر القسم',
+        listType: 1
+      }, { quoted: msg })
+    } catch (e) {
+      return sock.sendMessage(from, {
+        text: `📋 *قائمة الأقسام:*\n\n1️⃣ 👥 إدارة المجموعات\n2️⃣ 🤖 الذكاء الاصطناعي\n3️⃣ 🎮 الألعاب\n4️⃣ 🛡️ الحماية\n5️⃣ ⚙️ التفعيلات`
+      }, { quoted: msg })
+    }
+  }
+
+  // 📢 قناة البوت
+  if (buttonId === 'القناة') {
+    return sock.sendMessage(from, {
+      text: `📢 *قناة البوت*\n\n🔗 ${CHANNEL_LINK}\n\n📌 تابعنا لكل جديد`
+    }, { quoted: msg })
+  }
+
+  // 👤 حساب المالك
+  if (buttonId === 'المالك' || buttonId === 'owner') {
+    return sock.sendMessage(from, {
+      text: `👤 *حساب المالك*\n\n📛 ${OWNER_NAME}\n🔗 ${OWNER_CONTACT}`
+    }, { quoted: msg })
+  }
+
+  // 📋 أقسام القائمة
+  if (buttonId.startsWith('sec_')) {
+    return sock.sendMessage(from, {
+      text: getSectionContent(buttonId)
+    }, { quoted: msg })
+  }
+}
+ // ═══════════════════════════════════════════════════
+// 🎵 تست — فيديو نوت (دايرة)
+if (cmdText === 'تست' || cmdText === 'test') {
+  try {
+    const videoPath = path.join(__dirname, 'test_note.mp4')
+
+    if (!fs.existsSync(videoPath)) {
+      return sock.sendMessage(from, { text: '❌ الفيديو مش موجود' }, { quoted: msg })
+    }
+
+    await sock.sendMessage(from, {
+      video: fs.readFileSync(videoPath),
+      mimetype: 'video/mp4',
+      ptv: true
+    }, { quoted: msg })
+
+  } catch (e) {
+    console.log('❌ تست فشل:', e.message)
+    await sock.sendMessage(from, { text: '❌ خطأ: ' + e.message }, { quoted: msg })
+  }
+  return
+}
+
+      // ═══════════════════════════════════════════════════
+// 🏓 ping
+if (matchCommand(text, COMMANDS.ping)) {
+  const start = Date.now()
+  return sock.sendMessage(from, {
+    text: `🏓 *Pong!*\n⚡ السرعة: ${Date.now() - start}ms`
+  }, { quoted: msg })
+}
+
+// 📋 menu — القائمة الرئيسية بأزرار
+if (matchCommand(text, COMMANDS.menu)) {
+  let userName = 'مستخدم'
+  try {
+    userName = msg.pushName || senderNum || 'مستخدم'
+  } catch {}
+
+  const now = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })
+  const menuText = buildMenu(userName, OWNER_NAME, formatUptime(), now)
+
+  const buttons = [
+    { buttonId: 'الاقسام', buttonText: { displayText: '📋 اختر القسم' }, type: 1 },
+    { buttonId: 'القناة', buttonText: { displayText: '📢 قناة البوت' }, type: 1 },
+    { buttonId: 'المالك', buttonText: { displayText: '👤 حساب المالك' }, type: 1 }
+  ]
+
+  try {
+    if (BOT_IMAGE?.startsWith('http')) {
+      return sock.sendMessage(from, {
+        image: { url: BOT_IMAGE },
+        caption: menuText,
+        footer: '𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026',
+        buttons: buttons,
+        headerType: 4,
+        mentions: [senderJid]
+      }, { quoted: msg })
+    }
+    return sock.sendMessage(from, {
+      text: menuText,
+      footer: '𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026',
+      buttons: buttons,
+      headerType: 1,
+      mentions: [senderJid]
+    }, { quoted: msg })
+  } catch (e) {
+    console.log('⚠️ فشل الأزرار:', e.message)
+    return sock.sendMessage(from, { text: menuText }, { quoted: msg })
+  }
+}
+
+      // 👑 owner
+      if (matchCommand(text, COMMANDS.owner)) {
+        return sock.sendMessage(from, {
+          text: `╭━━━ 👑 *المالك* 👑 ━━━╮
+┃
+┃ 📛 *الاسم:* 3MK DARK
+┃ 💬 *التواصل:* Dark وكده😂
+┃
+╰━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg })
+      }
+// 🕐 time
+if (matchCommand(text, COMMANDS.time)) {
+  const now = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })
+  return sock.sendMessage(from, { text: `🕐 *الوقت:* ${now}` }, { quoted: msg })
+}
+
+// 📊 info
+if (matchCommand(text, COMMANDS.info)) {
+  return sock.sendMessage(from, {
+    text: `╭━━━ ⚡ ${BOT_NAME} ⚡ ━━━╮\n┃\n┃ 👑 المالك: DARK\n┃ ⚡ الإصدار: 2.0.0\n┃ 📊 بوتات: ${activeBots.size}\n┃ ⏱️ التشغيل: ${formatUptime()}\n┃\n╰━━━━━━━━━━━━━━━╯`
+  }, { quoted: msg })
+}
+      // ═══════════════════════════════════════════════════
+      // 🛡️ أوامر الإدارة (للجروبات + أدمن فقط)
+      // ═══════════════════════════════════════════════════
+      if (isGroup) {
+        const userIsAdmin = isOwner || await isAdmin(sock, from, senderJid)
+        const botIsAdmin = await isBotAdmin(sock, from)
+
+        // 🚫 طرد
+        if (matchCommand(text, COMMANDS.kick)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          const target = getMentioned(msg)
+          return kickMember(sock, from, msg, target)
+        }
+
+        // 👑 رفع
+        if (matchCommand(text, COMMANDS.promote)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          const target = getMentioned(msg)
+          return promoteMember(sock, from, msg, target)
+        }
+
+        // ⬇️ تنزيل
+        if (matchCommand(text, COMMANDS.demote)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          const target = getMentioned(msg)
+          return demoteMember(sock, from, msg, target)
+        }
+
+        // 🔒 قفل
+        if (matchCommand(text, COMMANDS.mute)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          return muteGroup(sock, from, msg)
+        }
+
+        // 🔓 فتح
+        if (matchCommand(text, COMMANDS.unmute)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          return unmuteGroup(sock, from, msg)
+        }
+
+        // 📢 تاك
+        if (matchCommand(text, COMMANDS.tagall)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          const tagText = text.replace(/^(تاك|\.تاك|tagall)\s*/i, '')
+          return tagAll(sock, from, msg, tagText)
+        }
+
+        // 🔗 لينك
+        if (matchCommand(text, COMMANDS.groupLink)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          return getGroupLink(sock, from, msg)
+        }
+
+        // 🔄 تصفير
+        if (matchCommand(text, COMMANDS.revoke)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          if (!botIsAdmin) return sock.sendMessage(from, { text: '❌ البوت مش أدمن' }, { quoted: msg })
+          return revokeLink(sock, from, msg)
+        }
+
+        // 📊 معلومات الجروب
+        if (matchCommand(text, COMMANDS.groupInfo)) {
+          return groupInfo(sock, from, msg)
+        }
+
+        // 👋 الترحيب
+        if (matchCommand(text, COMMANDS.onWelcome)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          return handleWelcomeToggle(sock, from, msg, true, global.db)
+        }
+        if (matchCommand(text, COMMANDS.offWelcome)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين فقط' }, { quoted: msg })
+          return handleWelcomeToggle(sock, from, msg, false, global.db)
+        }
+      }
+
+      // ═══════════════════════════════════════════════════
+      // 👑 أوامر المالك
+      // ═══════════════════════════════════════════════════
+      if (matchCommand(text, COMMANDS.owner)) {
+        return sock.sendMessage(from, {
+          text: `👑 *المالك:* wa.me/${OWNER_NUMBER}`
+        }, { quoted: msg })
+      }
+
+      if (matchCommand(text, COMMANDS.time)) {
+        const now = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })
+        return sock.sendMessage(from, { text: `🕐 *الوقت:* ${now}` }, { quoted: msg })
+      }
+
+      if (matchCommand(text, COMMANDS.info)) {
+        return sock.sendMessage(from, {
+          text: `╭━━━ ⚡ ${BOT_NAME} ⚡ ━━━╮\n┃\n┃ 👑 المالك: DARK\n┃ ⚡ الإصدار: 2.0.0\n┃ 📊 بوتات: ${activeBots.size}\n┃ ⏱️ التشغيل: ${formatUptime()}\n┃\n╰━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg })
+      }
+
+      if (matchCommand(text, COMMANDS.install)) {
+        await sock.sendMessage(from, {
+          text: `📱 *تنصيب بوت جديد*\n\nابعت رقمك مع كود الدولة\n⚠️ بدون + وبدون 0`
+        }, { quoted: msg })
+        pendingCodes.set(from, { step: 'awaiting_number', time: Date.now() })
+        return
+      }
+
+      const pending = pendingCodes.get(from)
+      if (pending && pending.step === 'awaiting_number') {
+        const number = text.replace(/[^0-9]/g, '')
+        if (number.length < 10 || number.length > 15) {
+          return sock.sendMessage(from, { text: '❌ رقم غلط!' }, { quoted: msg })
+        }
+        if (activeBots.has(number)) {
+          pendingCodes.delete(from)
+          return sock.sendMessage(from, { text: '⚠️ البوت شغال بالفعل!' }, { quoted: msg })
+        }
+        await sock.sendMessage(from, { text: '⏳ جاري التنصيب...' }, { quoted: msg })
+        pendingCodes.delete(from)
+        createSubBot(number, from, sock).catch(console.error)
+        return
+      }
+
+      if (matchCommand(text, COMMANDS.bots) && isOwner) {
+        if (activeBots.size === 0) {
+          return sock.sendMessage(from, { text: '📭 مفيش بوتات شغالة' }, { quoted: msg })
+        }
+        let list = '📋 *البوتات الشغالة:*\n\n'
+        let i = 1
+        for (const [num] of activeBots) {
+          list += `${i}. \`${num}\`\n`
+          i++
+        }
+        return sock.sendMessage(from, { text: list }, { quoted: msg })
+      }
+
+      if (matchCommand(text, COMMANDS.cancel) && isOwner) {
+        pendingCodes.delete(from)
+        return sock.sendMessage(from, { text: '✅ تم الإلغاء' }, { quoted: msg })
+      }
+
+      if (isOwner && (cmdText.startsWith('say ') || cmdText.startsWith('قول '))) {
+        const sayText = cmdText.replace(/^(say|قول)\s+/, '')
+        if (sayText) {
+          return sock.sendMessage(from, { text: sayText }, { quoted: msg })
+        }
+      }
+
+    } catch (err) {
+      console.log('❌ خطأ:', err.message)
+    }
+  })
+}
+
+async function createSubBot(phoneNumber, requesterJid, mainSock) {
+  const botDir = path.join(SUB_BOTS_DIR, phoneNumber)
+  if (fs.existsSync(botDir)) fs.rmSync(botDir, { recursive: true, force: true })
+  fs.mkdirSync(botDir, { recursive: true })
+
+  const { state, saveCreds } = await useMultiFileAuthState(botDir)
+  const { version } = await fetchLatestBaileysVersion()
+
+  const subSock = makeWASocket({
+    version,
+    logger,
+    auth: state,
+    browser: [`${BOT_NAME_SHORT}-SUB`, 'Chrome', '2.0.0']
+  })
+
+  subSock.ev.on('creds.update', saveCreds)
+
+  // ✅ طلب كود الاقتران (بدون QR)
+  await new Promise(r => setTimeout(r, 3000))
+
+  try {
+    const code = await subSock.requestPairingCode(phoneNumber)
+    const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
+
+    await mainSock.sendMessage(requesterJid, {
+      text: `*❮ 🔑┇ كود الإقران الخاص بك هو:*\n\n*${formattedCode}*\n\n📌 *خطوات الربط:*\n1. افتح تطبيق الواتساب على هاتفك.\n2. ادخل إلى *الأجهزة المرتبطة* ⚙️.\n3. اختر *ربط جهاز* ثم اضغط على *الربط برقم الهاتف*.\n4. أدخل الكود أعلاه خلال دقيقتين.\n\n📋 اضغط على الزر أدناه لنسخ الكود مباشرةً: ❯*\n\n*♢ •┆˹🪸╵ \`DARK\`╷⇊˼*`,
+      footer: '𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026',
+      buttons: [
+        { buttonId: `copy_${formattedCode}`, buttonText: { displayText: '📋 نسخ الكود' }, type: 1 }
+      ],
+      headerType: 1
+    }).catch(() => {
+      mainSock.sendMessage(requesterJid, {
+        text: `*❮ 🔑┇ كود الإقران الخاص بك هو:*\n\n*${formattedCode}*\n\n📌 *خطوات الربط:*\n1. افتح تطبيق الواتساب على هاتفك.\n2. ادخل إلى *الأجهزة المرتبطة* ⚙️.\n3. اختر *ربط جهاز* ثم اضغط على *الربط برقم الهاتف*.\n4. أدخل الكود أعلاه خلال دقيقتين.\n\n*♢ •┆˹🪸╵ \`DARK\`╷⇊˼*`
+      })
+    })
+
+  } catch (err) {
+    console.log('❌ فشل كود الاقتران:', err.message)
+    mainSock.sendMessage(requesterJid, {
+      text: `❌ فشل إنشاء الكود: ${err.message}`
+    }).catch(() => {})
+  }
+
+  // ✅ مراقبة الاتصال (بدون QR للفرعي)
+  subSock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect } = update
+
+    if (connection === 'open') {
+      console.log(`✅ بوت فرعي: ${phoneNumber}`)
+      activeBots.set(phoneNumber, subSock)
+      mainSock.sendMessage(requesterJid, {
+        text: `✅ *تم التنصيب بنجاح!*\n📱 ${phoneNumber}`
+      }).catch(() => {})
+    }
+
+    if (connection === 'close') {
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      if (reason !== DisconnectReason.loggedOut) {
+        setTimeout(() => {
+          activeBots.delete(phoneNumber)
+          createSubBot(phoneNumber, requesterJid, mainSock).catch(console.error)
+        }, 10000)
+      } else {
+        activeBots.delete(phoneNumber)
+      }
+    }
+  })
+}
+// ✅ طلب كود الاقتران
+await new Promise(r => setTimeout(r, 3000))
+
+try {
+  const code = await subSock.requestPairingCode(phoneNumber)
+  const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
+
+  // ✅ ابعت الكود للمستخدم بالشكل الفخم
+  await mainSock.sendMessage(requesterJid, {
+    text: `*❮ 🔑┇ كود الإقران الخاص بك هو:*\n\n*${formattedCode}*\n\n📌 *خطوات الربط:*\n1. افتح تطبيق الواتساب على هاتفك.\n2. ادخل إلى *الأجهزة المرتبطة* ⚙️.\n3. اختر *ربط جهاز* ثم اضغط على *الربط برقم الهاتف*.\n4. أدخل الكود أعلاه خلال دقيقتين.\n\n📋 اضغط على الزر أدناه لنسخ الكود مباشرةً: ❯*\n\n*♢ •┆˹🪸╵ \`DARK\`╷⇊˼*`,
+    footer: '𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026',
+    buttons: [
+      { 
+        buttonId: `copy_${formattedCode}`, 
+        buttonText: { displayText: '📋 نسخ الكود' }, 
+        type: 1 
+      }
+    ],
+    headerType: 1
+  }).catch(() => {
+    // ✅ احتياطي — نص عادي
+    mainSock.sendMessage(requesterJid, {
+      text: `*❮ 🔑┇ كود الإقران الخاص بك هو:*\n\n*${formattedCode}*\n\n📌 *خطوات الربط:*\n1. افتح تطبيق الواتساب على هاتفك.\n2. ادخل إلى *الأجهزة المرتبطة* ⚙️.\n3. اختر *ربط جهاز* ثم اضغط على *الربط برقم الهاتف*.\n4. أدخل الكود أعلاه خلال دقيقتين.\n\n*♢ •┆˹🪸╵ \`DARK\`╷⇊˼*`
+    })
+  })
+
+} catch (err) {
+  console.log('❌ فشل طلب كود الاقتران:', err.message)
+  mainSock.sendMessage(requesterJid, {
+    text: `❌ فشل إنشاء الكود: ${err.message}`
+  }).catch(() => {})
+}
+
+  subSock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update
+
+    if (qr && !subSock.authState.creds.registered) {
+      qrcode.generate(qr, { small: true })
+    }
+
+    if (connection === 'open') {
+      console.log(`✅ بوت فرعي: ${phoneNumber}`)
+      activeBots.set(phoneNumber, subSock)
+      mainSock.sendMessage(requesterJid, {
+        text: `✅ *تم التنصيب!*\n📱 ${phoneNumber}`
+      }).catch(() => {})
+    }
+
+    if (connection === 'close') {
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      if (reason !== DisconnectReason.loggedOut) {
+        setTimeout(() => {
+          activeBots.delete(phoneNumber)
+          createSubBot(phoneNumber, requesterJid, mainSock).catch(console.error)
+        }, 10000)
+      } else {
+        activeBots.delete(phoneNumber)
+      }
+    }
+  })
+
+  subSock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return
+    const msg = messages[0]
+    if (!msg.message) return
+    const from = msg.key.remoteJid
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
+    if (!text) return
+
+    try {
+      if (matchCommand(text, COMMANDS.ping)) {
+        await subSock.sendMessage(from, { text: '🏓 Pong!' }, { quoted: msg })
+      } else if (matchCommand(text, COMMANDS.menu)) {
+        await subSock.sendMessage(from, { text: buildMenu() }, { quoted: msg })
+      }
+    } catch (e) {}
+  })
+}
+
+function formatUptime() {
+  const u = process.uptime()
+  const h = Math.floor(u / 3600)
+  const m = Math.floor((u % 3600) / 60)
+  const s = Math.floor(u % 60)
+  return `${h}س ${m}د ${s}ث`
+}
+
+process.on('uncaughtException', (err) => console.log('❌', err.message))
+process.on('unhandledRejection', (err) => console.log('❌', err?.message || err))
+
+startBot().catch(err => console.error('❌', err.message))
