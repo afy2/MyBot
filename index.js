@@ -14,8 +14,6 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
-import { sendInteractiveMessage } from '@ryuu-reinzz/button-helper'
-
 import { checkMessage, toggleProtection } from './protection.js'
 import {
   COMMANDS, matchCommand, buildMenu, getSectionContent,
@@ -96,7 +94,7 @@ async function startBot() {
       console.log('⚠️ انقطع:', lastDisconnect?.error?.message)
 
       if (reason === DisconnectReason.loggedOut) {
-        console.log('❌ خروج — امسح session')
+        console.log('❌ خروج')
         return
       }
 
@@ -195,39 +193,42 @@ async function startBot() {
       }
 
       // menu بأزرار
-if (matchCommand(text, COMMANDS.menu)) {
-    const menuText = `🔸 *${BOT_NAME}* 🔸
+      if (matchCommand(text, COMMANDS.menu)) {
+        const menuText = `🔸 *${BOT_NAME}* 🔸
 
 👤 *المستخدم:* @${senderNum}
 ⚙️ *التشغيل:* ${formatUptime()}
 
-📋 *اختر قسم من القائمة:*`;
+📋 *اختر قسم من القائمة:*`
 
-    try {
-        // استخدام المكتبة المساعدة لإرسال الأزرار بشكل مضمون
-        const { sendInteractiveMessage } = await import('flowleys-helper');
-        
-        await sendInteractiveMessage(sock, from, {
+        try {
+          console.log('🔵 جاري إرسال الأزرار...')
+          const { sendInteractiveMessage } = await import('flowleys-helper')
+          console.log('🔵 flowleys-helper اتحمل')
+
+          await sendInteractiveMessage(sock, from, {
             text: menuText,
             footer: `${BOT_NAME} © 2026`,
             interactiveButtons: [
-                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
-                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
-                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
-                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
             ]
-        }, { quoted: msg });
-        return;
-    } catch (e) {
-        console.log('❌ فشل إرسال الأزرار:', e.message);
-        // لو فشلت، ارجع للنص العادي
-        return sock.sendMessage(from, { text: menuText + '\n\n📌 اكتب *ادمن* للمزيد' }, { quoted: msg });
-    }
-}
+          }, { quoted: msg })
+
+          console.log('✅ الأزرار اتبعتت')
+          return
+        } catch (e) {
+          console.log('❌ فشل إرسال الأزرار:', e.message)
+          return sock.sendMessage(from, { text: menuText + '\n\n📌 اكتب *ادمن* للمزيد' }, { quoted: msg })
+        }
+      }
 
       // معالجة الأزرار
       const buttonId = msg.message?.buttonsResponseMessage?.selectedButtonId
         || msg.message?.templateButtonReplyMessage?.selectedId
+        || msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id
 
       if (buttonId) {
         let responseText = ''
@@ -279,24 +280,12 @@ if (matchCommand(text, COMMANDS.menu)) {
         const userIsAdmin = isOwner || await isAdmin(sock, from, senderJid)
         const chat = global.db.data.chats[from] || {}
 
-        if (matchCommand(text, COMMANDS.enableAntilink) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antilink', true)
-        }
-        if (matchCommand(text, COMMANDS.disableAntilink) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antilink', false)
-        }
-        if (matchCommand(text, COMMANDS.enableAntibad) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antibad', true)
-        }
-        if (matchCommand(text, COMMANDS.disableAntibad) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antibad', false)
-        }
-        if (matchCommand(text, COMMANDS.enableAntiviewonce) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', true)
-        }
-        if (matchCommand(text, COMMANDS.disableAntiviewonce) && userIsAdmin) {
-          return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', false)
-        }
+        if (matchCommand(text, COMMANDS.enableAntilink) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antilink', true)
+        if (matchCommand(text, COMMANDS.disableAntilink) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antilink', false)
+        if (matchCommand(text, COMMANDS.enableAntibad) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antibad', true)
+        if (matchCommand(text, COMMANDS.disableAntibad) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antibad', false)
+        if (matchCommand(text, COMMANDS.enableAntiviewonce) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', true)
+        if (matchCommand(text, COMMANDS.disableAntiviewonce) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', false)
       }
 
       // ألعاب
@@ -349,11 +338,7 @@ if (matchCommand(text, COMMANDS.menu)) {
 
       // اقتباس
       if (matchCommand(text, COMMANDS.quote)) return randomQuote(sock, from, msg)
-
-      // نكتة
       if (matchCommand(text, COMMANDS.joke)) return randomJoke(sock, from, msg)
-
-      // هل تعلم
       if (matchCommand(text, COMMANDS.fact)) return randomFact(sock, from, msg)
 
       // فضح
@@ -427,7 +412,7 @@ if (matchCommand(text, COMMANDS.menu)) {
         return
       }
 
-      // فتح/قفل تنصيب
+      // فتح/قفل
       if (cmdText === 'فتح تنصيب') {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         installOpen = true
