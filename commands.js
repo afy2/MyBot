@@ -7,7 +7,6 @@ import { WELCOME_IMAGE, GOODBYE_IMAGE, WELCOME_AUDIO, BOT_IMAGES, getRandomImage
 export const NOT_OWNER_MSG = `بس. ي حبيــــᬼٰٰٰٰٖٖـ͜ــــبي لما تكـ̮ـــ͢ـ̸̐ـــــ̮بر ابقا افتـــ᭄ـ͜ـــحو🛀🏽🍷┊𖤐𓈒𓏲\n𝑫𝑨𝑹𝑲ᬽ🙄🍷┊𖤐𓈒𓏲`
 
 export const COMMANDS = {
-  // ✅ عامة
   ping: ['ping', 'بينج', 'اختبار'],
   menu: ['menu', 'قائمة', 'الاوامر', 'الأوامر', 'help', 'مساعدة', 'اوامر', 'شرح'],
   owner_menu: ['اونر', 'owner menu', 'اوامر المالك'],
@@ -19,38 +18,32 @@ export const COMMANDS = {
   test: ['تست', 'test'],
   bots: ['البوتات', 'bots'],
 
-  // ✅ إدارة
-  kick: ['طرد', 'kick'],
+  kick: ['اطرد', 'kick'],
   promote: ['ارفع', 'promote'],
   demote: ['نزل', 'demote'],
-  mute: ['اسكت', 'mute', 'اكتمو','اخرسو' ],
+  mute: ['اسكت', 'mute'],
   unmute: ['اتكلم', 'unmute'],
   tagall: ['تاك', 'tagall'],
   groupLink: ['لينك', 'link'],
   revoke: ['تصفير', 'revoke'],
   groupInfo: ['معلومات الجروب'],
-  profile: ['بروفايل', 'profile', 'معلومات'],
-  // ✅ المالك
+
   say: ['say', 'قول'],
   cancel: ['الغاء'],
   openInstall: ['فتح تنصيب', 'open install'],
   closeInstall: ['قفل تنصيب', 'close install'],
 
-  // ✅ ترحيب
   onWelcome: ['on welcome', 'تفعيل الترحيب'],
   offWelcome: ['off welcome', 'تعطيل الترحيب'],
 
-  // ✅ كتم
-  mute_member: ['كتم', 'صدعتني'],
-  unmute_member: ['فك كتم','فكو', 'فك', 'اتكلم'],
+  mute_member: ['كتم'],
+  unmute_member: ['فك كتم'],
   mutedList: ['المكتومين', 'muted'],
 
-  // ✅ فروع
   addSubBot: ['اضف فرعي'],
   removeSubBot: ['امسح فرعي'],
   subBotsList: ['الفروع', 'subbots'],
 
-  // ✅ حماية
   enableAntilink: ['تفعيل منع الروابط', 'on antilink'],
   disableAntilink: ['ايقاف منع الروابط', 'off antilink'],
   antilink: ['منع الروابط', 'antilink'],
@@ -62,17 +55,14 @@ export const COMMANDS = {
   antiviewonce: ['منع الاستوري', 'antiviewonce'],
   activationMenu: ['تفعيل', 'activation'],
 
-  // ✅ ألعاب
   xo: ['اكس او', 'xo', 'اكس'],
   guess: ['تخمين', 'guess'],
   rps: ['حجر ورقة مقص', 'rps', 'حجر'],
   dice: ['نرد', 'dice'],
 
-  // ✅ ذكاء
   ai: ['ذكاء', 'ai', 'اسأل'],
   image: ['صوره', 'image', 'img'],
 
-  // ✅ أدوات
   decorate: ['زخرفة', 'decorate'],
   reverse: ['عكس', 'reverse'],
   calc: ['حاسبة', 'calc', 'احسب'],
@@ -80,16 +70,15 @@ export const COMMANDS = {
   joke: ['نكتة', 'joke', 'نكته'],
   fact: ['هل تعلم', 'fact'],
 
-  // ✅ فضح
   expose: ['فضح', 'expose'],
 
-  // ✅ مسح
   clear: ['مسح', 'clear'],
   clearAll: ['مسح الكل', 'clearall'],
 
-  // ✅ مشغل
   play: ['تشغيل', 'play', 'شغل'],
-  search: ['بحث', 'search', 'يبحث']
+  search: ['بحث', 'search', 'يبحث'],
+
+  buttonsMenu: ['ازرار', 'buttons']
 }
 
 export function matchCommand(text, keywords) {
@@ -98,9 +87,6 @@ export function matchCommand(text, keywords) {
   return keywords.some(k => clean === k.toLowerCase())
 }
 
-// ═══════════════════════════════════════════════════════
-// 📋 القائمة الرئيسية
-// ═══════════════════════════════════════════════════════
 export function buildMenu(userName = 'مستخدم', uptime = '00:00:00', time = '') {
   return `🔸 *𝑩𝑶𝑻 𝑫𝑨𝑹𝑲* 🔸
 ━━━━━━━━━━━━━━━
@@ -111,19 +97,18 @@ export function buildMenu(userName = 'مستخدم', uptime = '00:00:00', time =
 
 ━━━━━━━━━━━━━━━
 
-📋 *الأوامر المتاحة:*
+📋 *اختر من القائمة:*
 
-🔹 *اوامر* — أوامر عامة
-🔹 *ادمن* — أوامر الإدارة
-🔹 *اونر* — أوامر المالك
+🔹 الأوامر العامة
+🔹 أوامر الإدارة
+🔹 أوامر المالك
+🔹 الألعاب
+🔹 الأدوات
 
 ━━━━━━━━━━━━━━━
 𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026`
 }
 
-// ═══════════════════════════════════════════════════════
-// 📋 الأقسام
-// ═══════════════════════════════════════════════════════
 export function getSectionContent(id) {
   const sections = {
     admin: `╭━━━ 🛡️ *أوامر الإدارة* 🛡️ ━━━╮
@@ -148,38 +133,11 @@ export function getSectionContent(id) {
 ┃
 ╰━━━━━━━━━━━━━━━╯
 
-╭━━━ 🎭 *الفضح* ━━━╮
-┃
-┃ 🔹 فضح (رد على ميديا)
-┃
-╰━━━━━━━━━━━━━━━╯
-
 ╭━━━ 🛡️ *الحماية* ━━━╮
 ┃
-┃ 🔹 منع الروابط (تبديل)
-┃ 🔹 منع الشتائم (تبديل)
-┃ 🔹 منع الاستوري (تبديل)
-┃
-┃ 🔹 تفعيل منع الروابط
-┃ 🔹 ايقاف منع الروابط
-┃ 🔹 تفعيل منع الشتائم
-┃ 🔹 ايقاف منع الشتائم
-┃ 🔹 تفعيل منع الاستوري
-┃ 🔹 ايقاف منع الاستوري
-┃
-╰━━━━━━━━━━━━━━━╯
-
-╭━━━ 👋 *الترحيب* ━━━╮
-┃
-┃ 🔹 تفعيل الترحيب
-┃ 🔹 تعطيل الترحيب
-┃
-╰━━━━━━━━━━━━━━━╯
-
-╭━━━ 🗑️ *المسح* ━━━╮
-┃
-┃ 🔹 مسح (رد على رسالة)
-┃ 🔹 مسح الكل
+┃ 🔹 منع الروابط
+┃ 🔹 منع الشتائم
+┃ 🔹 منع الاستوري
 ┃
 ╰━━━━━━━━━━━━━━━╯`,
 
@@ -190,11 +148,6 @@ export function getSectionContent(id) {
 ┃ 🔹 فتح تنصيب
 ┃ 🔹 قفل تنصيب
 ┃ 🔹 الغاء
-┃
-╰━━━━━━━━━━━━━━━╯
-
-╭━━━ 🔧 *إدارة الفروع* ━━━╮
-┃
 ┃ 🔹 اضف فرعي @عضو
 ┃ 🔹 امسح فرعي @عضو
 ┃ 🔹 الفروع
@@ -204,9 +157,6 @@ export function getSectionContent(id) {
   return sections[id] || '❌ قسم غير موجود'
 }
 
-// ═══════════════════════════════════════════════════════
-// 👋 الترحيب
-// ═══════════════════════════════════════════════════════
 export async function handleWelcome(sock, event, db) {
   const { id, participants, action } = event
   if (!id || !participants) return
@@ -282,7 +232,6 @@ export async function handleWelcomeToggle(sock, from, msg, enable, db) {
   }, { quoted: msg })
 }
 
-// ✅ جلب صورة عشوائية
 export function getAnimeImage(category = 'waifu') {
   if (BOT_IMAGES && BOT_IMAGES.length > 0) {
     return getRandomImage()

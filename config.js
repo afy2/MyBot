@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════
-// ⚡ 𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 - الإعدادات
+//  𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 - الإعدادات
 // ═══════════════════════════════════════════════════════
 
 export const OWNER_NUMBER = '201039821496'
@@ -19,7 +19,6 @@ export const CHANNEL_LINK = 'https://whatsapp.com/channel/0029Vb7Jxk4K0IBcsdKEas
 export const OWNER_CONTACT = 'https://wa.me/201039821496'
 export const OWNER_NAME = '3MK DARK'
 
-// ✅ صور البوت
 export const BOT_IMAGES = [
   'https://i.postimg.cc/rw2L8Wd8/IMG-20260919-WA0143.jpg',
   'https://i.postimg.cc/mZcDkYrb/images-(4).jpg',
