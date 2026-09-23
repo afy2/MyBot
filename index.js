@@ -13,7 +13,7 @@ import qrcode from 'qrcode-terminal'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { getProfile } from './profile.js'
+
 import { checkMessage, toggleProtection, toggleAllProtection } from './protection.js'
 import {
   COMMANDS, matchCommand, buildMenu, getSectionContent,
@@ -40,18 +40,6 @@ import {
 const logger = pino({ level: 'silent' })
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-import { exec } from 'child_process'
-
-// ✅ استخراج الجلسة من SESSION_ID
-if (process.env.SESSION_ID) {
-  try {
-    fs.writeFileSync('session.tar.gz', Buffer.from(process.env.SESSION_ID, 'base64'))
-    exec('tar -xzf session.tar.gz')
-    console.log('✅ تم استخراج الجلسة')
-  } catch (e) {
-    console.log('❌ فشل:', e.message)
-  }
-}
 // ✅ المتغيرات العامة
 if (!global.db) global.db = { data: { chats: {}, users: {} } }
 if (!global.db.data.chats) global.db.data.chats = {}
@@ -194,7 +182,7 @@ async function startBot() {
         try {
           await sock.sendMessage(from, { delete: msg.key })
           await sock.sendMessage(from, {
-            text: `ٱخـ̐ــ̐͢ـ͓ـ̐ـ͢ـ͓̐ـ٭ٰ۬ۛﹻ٭ٰ۬ۛﹻــرس يبــۥـ℘ـۥــن م⃟راتـــ۬ۦٕ٘۬ 𖥡ﹻٰ۬ۛۛــي @${senderNum}*\n\n📌 انت مكتوم`,
+            text: `🤐 *اسكت يا @${senderNum}*\n\n📌 انت مكتوم`,
             mentions: [senderJid]
           })
           return
@@ -216,16 +204,6 @@ async function startBot() {
         } catch (e) {}
         return
       }
-
-// ═══ بروفايل ═══
-if (matchCommand(text, COMMANDS.profile)) {
-  const target = getMentioned(msg)
-  if (!target) {
-    return sock.sendMessage(from, { text: '❌ اعمل منشن للعضو أو رد على رسالته' }, { quoted: msg })
-  }
-  return getProfile(sock, from, msg, target)
-}
-
 
       // ═══ ping ═══
       if (matchCommand(text, COMMANDS.ping)) {
@@ -705,6 +683,8 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
   if (fs.existsSync(botDir)) fs.rmSync(botDir, { recursive: true, force: true })
   fs.mkdirSync(botDir, { recursive: true })
 
+  console.log(`\n🔧 إنشاء بوت فرعي: ${phoneNumber}`)
+
   const { state, saveCreds } = await useMultiFileAuthState(botDir)
   const { version } = await fetchLatestBaileysVersion()
 
@@ -734,6 +714,8 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
 
     if (connection === 'close') {
       const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+      console.log(`⚠️ بوت ${phoneNumber} انقطع: ${reason}`)
+
       if (reason !== DisconnectReason.loggedOut) {
         setTimeout(() => {
           activeBots.delete(phoneNumber)
@@ -745,7 +727,7 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
     }
 
     if (connection === 'open') {
-      console.log(`✅ بوت فرعي: ${phoneNumber}`)
+      console.log(`✅ بوت فرعي اتصل: ${phoneNumber}`)
       activeBots.set(phoneNumber, subSock)
       await mainSock.sendMessage(requesterJid, {
         text: `✅ *تم التنصيب بنجاح!*\n📱 ${phoneNumber}`
@@ -759,9 +741,11 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
 
     codeSent = true
     try {
+      console.log(`🔑 طلب كود لـ ${phoneNumber}...`)
       const code = await subSock.requestPairingCode(phoneNumber)
       const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
-      console.log(`🔑 كود ${phoneNumber}: ${formattedCode}`)
+      console.log(`✅ كود ${phoneNumber}: ${formattedCode}`)
+
       await mainSock.sendMessage(requesterJid, {
         text: `╭━━━ ⚡ *𝑩𝑶𝑻 𝑫𝑨𝑹𝑲* ⚡ ━━━╮
 ┃
@@ -776,29 +760,14 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
 ┃
 ╰━━━━━ 𝑫𝑨𝑹𝑲 ━━━━━╯`
       }).catch(() => {})
+
     } catch (err) {
       console.log(`❌ فشل كود ${phoneNumber}: ${err.message}`)
+      await mainSock.sendMessage(requesterJid, {
+        text: `❌ *فشل إنشاء الكود*\n\n⚠️ جرب تاني بعد 15 دقيقة`
+      }).catch(() => {})
     }
-  }, 3000)
-
-  subSock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return
-    const msg = messages[0]
-    if (!msg.message) return
-    const from = msg.key.remoteJid
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
-    if (!text) return
-
-    try {
-      if (matchCommand(text, COMMANDS.ping)) {
-        await subSock.sendMessage(from, { text: '🏓 Pong!' }, { quoted: msg })
-      } else if (matchCommand(text, COMMANDS.menu)) {
-        await subSock.sendMessage(from, { text: buildMenu() }, { quoted: msg })
-      } else if (matchCommand(text, COMMANDS.owner)) {
-        await subSock.sendMessage(from, { text: `👑 ${OWNER_NAME}` }, { quoted: msg })
-      }
-    } catch (e) {}
-  })
+  }, 5000)
 }
 
 // ═══════════════════════════════════════════════════════
