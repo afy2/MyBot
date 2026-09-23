@@ -48,6 +48,8 @@ if (!global.mutedUsers) global.mutedUsers = new Map()
 if (!global.botMessages) global.botMessages = {}
 if (!global.authorizedUsers) global.authorizedUsers = new Set()
 if (!global.games) global.games = { xo: new Map(), guess: new Map(), rps: new Map() }
+if (!global.installCooldown) global.installCooldown = new Map()
+if (!global.subBotCooldown) global.subBotCooldown = new Map()
 
 const AUTH_FILE = path.join(__dirname, 'authorized.json')
 if (fs.existsSync(AUTH_FILE)) {
@@ -504,6 +506,21 @@ async function startBot() {
         if (!installOpen && !isOwner) {
           return sock.sendMessage(from, { text: `🔒 *التنصيب مقفول*` }, { quoted: msg })
         }
+
+        // ✅ cooldown
+        const lastRequest = global.installCooldown.get(from) || 0
+        const now = Date.now()
+        const cooldownTime = 50000
+
+        if (now - lastRequest < cooldownTime && !isOwner) {
+          const remaining = Math.ceil((cooldownTime - (now - lastRequest)) / 1000)
+          return sock.sendMessage(from, {
+            text: `⏳ *استنى ${remaining} ثانية*\n\nمش هينفع تطلب كود تاني بسرعة`
+          }, { quoted: msg })
+        }
+
+        global.installCooldown.set(from, now)
+
         await sock.sendMessage(from, {
           text: `📱 *تنصيب بوت جديد*\n\nابعت رقمك مع كود الدولة\n⚠️ بدون + وبدون 0`
         }, { quoted: msg })
@@ -742,6 +759,17 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
     codeSent = true
     try {
       console.log(`🔑 طلب كود لـ ${phoneNumber}...`)
+
+      const lastSub = global.subBotCooldown.get(phoneNumber) || 0
+      const now = Date.now()
+
+      if (now - lastSub < 50000) {
+        console.log(`⏳ ${phoneNumber} في cooldown`)
+        return
+      }
+
+      global.subBotCooldown.set(phoneNumber, now)
+
       const code = await subSock.requestPairingCode(phoneNumber)
       const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
       console.log(`✅ كود ${phoneNumber}: ${formattedCode}`)
