@@ -14,6 +14,8 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
+import { sendInteractiveMessage } from '@ryuu-reinzz/button-helper'
+
 import { checkMessage, toggleProtection } from './protection.js'
 import {
   COMMANDS, matchCommand, buildMenu, getSectionContent,
@@ -201,23 +203,22 @@ async function startBot() {
 
 📋 *اختر قسم من القائمة:*`
 
-        const buttons = [
-          { buttonId: 'menu_general', buttonText: { displayText: '📋 أوامر عامة' }, type: 1 },
-          { buttonId: 'menu_admin', buttonText: { displayText: '🛡️ الإدارة' }, type: 1 },
-          { buttonId: 'menu_games', buttonText: { displayText: '🎮 الألعاب' }, type: 1 },
-          { buttonId: 'menu_tools', buttonText: { displayText: '🛠️ الأدوات' }, type: 1 }
-        ]
-
         try {
-          return await sock.sendMessage(from, {
+          // استخدام المكتبة المساعدة لإرسال الأزرار
+          await sendInteractiveMessage(sock, from, {
             text: menuText,
             footer: `${BOT_NAME} © 2026`,
-            buttons: buttons,
-            headerType: 1,
-            mentions: [senderJid]
+            interactiveButtons: [
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
+            ]
           }, { quoted: msg })
+          return
         } catch (e) {
-          return sock.sendMessage(from, { text: menuText + '\n\n📌 اكتب *ادمن* للمزيد' }, { quoted: msg })
+          // لو فشل، ارجع للنص العادي
+          return sock.sendMessage(from, { text: menuText }, { quoted: msg })
         }
       }
 
