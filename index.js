@@ -674,7 +674,7 @@ async function startBot() {
 
       // ═══ الغاء ═══
       if (matchCommand(text, COMMANDS.cancel)) {
-        if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
+        if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted:msg })
         pendingCodes.delete(from)
         return sock.sendMessage(from, { text: '✅ تم الإلغاء' }, { quoted: msg })
       }
@@ -712,22 +712,18 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
     browser: ['DARK-SUB', 'Chrome', '2.0.0'],
     markOnlineOnConnect: true,
     syncFullHistory: false,
-    generateHighQualityLinkPreview: false
+    generateHighQualityLinkPreview: false,
+    connectTimeoutMs: 60000,
+    defaultQueryTimeoutMs: 60000,
+    keepAliveIntervalMs: 30000
   })
 
   subSock.ev.on('creds.update', saveCreds)
 
   let codeSent = false
-  let qrSent = false
 
   subSock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update
-
-    if (qr && !subSock.authState.creds.registered && !qrSent) {
-      qrSent = true
-      console.log(`\n📱 QR للبوت الفرعي: ${phoneNumber}\n`)
-      qrcode.generate(qr, { small: true })
-    }
+    const { connection, lastDisconnect } = update
 
     if (connection === 'close') {
       const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
@@ -752,6 +748,7 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
     }
   })
 
+  // ✅ استنى 10 ثواني — عشان الاتصال يستقر
   setTimeout(async () => {
     if (codeSent) return
     if (subSock.authState.creds.registered) return
@@ -760,6 +757,7 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
     try {
       console.log(`🔑 طلب كود لـ ${phoneNumber}...`)
 
+      // ✅ cooldown
       const lastSub = global.subBotCooldown.get(phoneNumber) || 0
       const now = Date.now()
 
@@ -770,6 +768,7 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
 
       global.subBotCooldown.set(phoneNumber, now)
 
+      // ✅ طلب الكود
       const code = await subSock.requestPairingCode(phoneNumber)
       const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
       console.log(`✅ كود ${phoneNumber}: ${formattedCode}`)
@@ -795,9 +794,8 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
         text: `❌ *فشل إنشاء الكود*\n\n⚠️ جرب تاني بعد 15 دقيقة`
       }).catch(() => {})
     }
-  }, 5000)
+  }, 10000)
 }
-
 // ═══════════════════════════════════════════════════════
 // 🛠️ أدوات
 // ═══════════════════════════════════════════════════════
