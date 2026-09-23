@@ -6,7 +6,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion
-} from '@vanzxy/baileys'
+} from '@itsukichann/baileys'
 import { Boom } from '@hapi/boom'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
@@ -195,32 +195,35 @@ async function startBot() {
       }
 
       // menu بأزرار
-      if (matchCommand(text, COMMANDS.menu)) {
-        const menuText = `🔸 *${BOT_NAME}* 🔸
+if (matchCommand(text, COMMANDS.menu)) {
+    const menuText = `🔸 *${BOT_NAME}* 🔸
 
 👤 *المستخدم:* @${senderNum}
 ⚙️ *التشغيل:* ${formatUptime()}
 
-📋 *اختر قسم من القائمة:*`
+📋 *اختر قسم من القائمة:*`;
 
-        try {
-          // استخدام المكتبة المساعدة لإرسال الأزرار
-          await sendInteractiveMessage(sock, from, {
+    try {
+        // استخدام المكتبة المساعدة لإرسال الأزرار بشكل مضمون
+        const { sendInteractiveMessage } = await import('flowleys-helper');
+        
+        await sendInteractiveMessage(sock, from, {
             text: menuText,
             footer: `${BOT_NAME} © 2026`,
             interactiveButtons: [
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
+                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
+                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
+                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
+                { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
             ]
-          }, { quoted: msg })
-          return
-        } catch (e) {
-          // لو فشل، ارجع للنص العادي
-          return sock.sendMessage(from, { text: menuText }, { quoted: msg })
-        }
-      }
+        }, { quoted: msg });
+        return;
+    } catch (e) {
+        console.log('❌ فشل إرسال الأزرار:', e.message);
+        // لو فشلت، ارجع للنص العادي
+        return sock.sendMessage(from, { text: menuText + '\n\n📌 اكتب *ادمن* للمزيد' }, { quoted: msg });
+    }
+}
 
       // معالجة الأزرار
       const buttonId = msg.message?.buttonsResponseMessage?.selectedButtonId
