@@ -2,7 +2,7 @@
 // 🎭 الفضح - 𝑩𝑶𝑻 𝑫𝑨𝑹𝑲
 // ═══════════════════════════════════════════════════════
 
-import { downloadContentFromMessage } from '@itsukichann/baileys'
+import { downloadContentFromMessage } from '@itsukichan/baileys'
 
 // ✅ فضح — يبعت الميديا اللي رديت عليها
 export async function exposeMedia(sock, from, msg, senderJid) {
