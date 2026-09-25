@@ -14,7 +14,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
-import { checkMessage, toggleProtection } from './protection.js'
+import { checkMessage, toggleProtection, toggleAllProtection } from './protection.js'
 import {
   COMMANDS, matchCommand, buildMenu, getSectionContent,
   handleWelcome, handleWelcomeToggle,
@@ -27,7 +27,8 @@ import { exposeMedia } from './expose.js'
 import { decorateText, reverseText, calcExpression, randomQuote, randomJoke, randomFact } from './tools.js'
 import {
   OWNER_NUMBER, BOT_NAME, BOT_NAME_SHORT,
-  SESSION_DIR, SUB_BOTS_DIR, CHANNEL_LINK, OWNER_CONTACT, OWNER_NAME
+  BOT_IMAGE, PREFIX, SESSION_DIR, SUB_BOTS_DIR,
+  CHANNEL_LINK, OWNER_CONTACT, OWNER_NAME
 } from './config.js'
 import {
   isAdmin, isBotAdmin, getMentioned,
@@ -39,6 +40,7 @@ import {
 const logger = pino({ level: 'silent' })
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// ✅ المتغيرات العامة
 if (!global.db) global.db = { data: { chats: {}, users: {} } }
 if (!global.db.data.chats) global.db.data.chats = {}
 if (!global.db.data.users) global.db.data.users = {}
@@ -49,11 +51,27 @@ if (!global.games) global.games = { xo: new Map(), guess: new Map(), rps: new Ma
 if (!global.installCooldown) global.installCooldown = new Map()
 if (!global.subBotCooldown) global.subBotCooldown = new Map()
 
+const AUTH_FILE = path.join(__dirname, 'authorized.json')
+if (fs.existsSync(AUTH_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'))
+    data.forEach(u => global.authorizedUsers.add(u))
+  } catch (e) {}
+}
+
+function saveAuthorized() {
+  try {
+    fs.writeFileSync(AUTH_FILE, JSON.stringify(Array.from(global.authorizedUsers), null, 2))
+  } catch (e) {}
+}
+
+if (!fs.existsSync(SUB_BOTS_DIR)) fs.mkdirSync(SUB_BOTS_DIR)
+
 const activeBots = new Map()
 const pendingCodes = new Map()
 let isReconnecting = false
 let reconnectCount = 0
-let installOpen = true
+let installOpen = false
 
 // ═══════════════════════════════════════════════════════
 // 🚀 البوت الرئيسي
@@ -87,6 +105,7 @@ async function startBot() {
         console.log('\n📱 امسح QR Code من واتساب:\n')
       }
       qrcode.generate(qr, { small: true })
+      console.log('\n⚠️ صالح 30-40 ثانية\n')
     }
 
     if (connection === 'close') {
@@ -94,7 +113,7 @@ async function startBot() {
       console.log('⚠️ انقطع:', lastDisconnect?.error?.message)
 
       if (reason === DisconnectReason.loggedOut) {
-        console.log('❌ خروج')
+        console.log('❌ خروج — امسح session')
         return
       }
 
@@ -146,10 +165,11 @@ async function startBot() {
     ].some(v => v === true)
 
     let cmdText = text.replace(/^[.\/!#*]/, '').trim().toLowerCase()
+
     console.log(`📩 ${senderNum}: ${text} | مالك: ${isOwner}`)
 
     try {
-      // حماية
+      // ═══ الحماية ═══
       if (isGroup && !isOwner) {
         try {
           const userIsAdmin = await isAdmin(sock, from, senderJid)
@@ -159,192 +179,293 @@ async function startBot() {
         } catch (e) {}
       }
 
-      // مكتومين
+      // ═══ فحص المكتومين ═══
       if (global.mutedUsers.has(senderJid) && !isOwner) {
         try {
           await sock.sendMessage(from, { delete: msg.key })
           await sock.sendMessage(from, {
-            text: `🤐 *اسكت يا @${senderNum}*`,
+            text: `🤐 *اسكت يا @${senderNum}*\n\n📌 انت مكتوم`,
             mentions: [senderJid]
           })
           return
         } catch (e) {}
       }
 
-      // تست
+      // ═══ تست ═══
       if (matchCommand(text, COMMANDS.test)) {
         try {
           const videoPath = path.join(__dirname, 'test_note.mp4')
+          if (!fs.existsSync(videoPath)) {
+            return sock.sendMessage(from, { text: '❌ الفيديو مش موجود' }, { quoted: msg })
+          }
+          await sock.sendMessage(from, {
+            video: fs.readFileSync(videoPath),
+            mimetype: 'video/mp4',
+            ptv: true
+          }, { quoted: msg })
+        } catch (e) {}
+        return
+      }
+
+      // ═══ ping ═══
+      if (matchCommand(text, COMMANDS.ping)) {
+        const start = Date.now()
+        const animeUrl = getAnimeImage('neko')
+        if (animeUrl) {
+          return sock.sendMessage(from, {
+            image: { url: animeUrl },
+            caption: `🏓 *Pong!*\n⚡ ${Date.now() - start}ms`
+          }, { quoted: msg })
+        }
+        return sock.sendMessage(from, { text: `🏓 *Pong!*\n⚡ ${Date.now() - start}ms` }, { quoted: msg })
+      }
+
+      // ═══ menu ═══
+      if (matchCommand(text, COMMANDS.menu)) {
+        const menuText = `╭━━━ ⚡ *𝑩𝑶𝑻 𝑫𝑨𝑹𝑲* ⚡ ━━━╮
+┃
+┃ 📋 *الأوامر العامة*
+┃
+┃ 🔹 بينج / ping
+┃ 🔹 المالك / owner
+┃ 🔹 الوقت / time
+┃ 🔹 معلومات / info
+┃ 🔹 تنصيب
+┃ 🔹 تست
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 🎵 *المشغل* ━━━╮
+┃
+┃ 🔹 تشغيل [اسم أغنية]
+┃ 🔹 بحث [كلمة]
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 🤖 *الذكاء الاصطناعي* ━━━╮
+┃
+┃ 🔹 ذكاء [سؤال]
+┃ 🔹 صوره [وصف]
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 🎮 *الألعاب* ━━━╮
+┃
+┃ 🔹 نرد
+┃ 🔹 اكس او @عضو
+┃ 🔹 تخمين
+┃ 🔹 حجر ورقة مقص
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 🛠️ *الأدوات* ━━━╮
+┃
+┃ 🔹 زخرفة [نص]
+┃ 🔹 عكس [نص]
+┃ 🔹 حاسبة [عملية]
+┃ 🔹 اقتباس
+┃ 🔹 نكتة
+┃ 🔹 هل تعلم
+┃
+╰━━━━━━━━━━━━━━━╯
+
+━━━━━━━━━━━━━━━
+📌 *للمزيد:*
+🔹 *ادمن* — أوامر الإدارة
+🔹 *اونر* — أوامر المالك
+
+👑 ${OWNER_NAME}
+𝑩𝑶𝑻 𝑫𝑨𝑹𝑲 © 2026`
+
+        const animeUrl = getAnimeImage('waifu')
+        if (animeUrl) {
+          await sock.sendMessage(from, {
+            image: { url: animeUrl },
+            caption: menuText,
+            mentions: [senderJid]
+          }, { quoted: msg })
+        } else {
+          await sock.sendMessage(from, { text: menuText, mentions: [senderJid] }, { quoted: msg })
+        }
+
+        try {
+          const videoPath = path.join(__dirname, 'test_note.mp4')
           if (fs.existsSync(videoPath)) {
+            await new Promise(r => setTimeout(r, 1500))
             await sock.sendMessage(from, {
               video: fs.readFileSync(videoPath),
               mimetype: 'video/mp4',
               ptv: true
-            }, { quoted: msg })
+            })
           }
         } catch (e) {}
         return
       }
 
-      // ping
-      if (matchCommand(text, COMMANDS.ping)) {
-        const start = Date.now()
-        return sock.sendMessage(from, { text: `🏓 *Pong!*\n⚡ ${Date.now() - start}ms` }, { quoted: msg })
-      }
-
-      // menu بأزرار
-      if (matchCommand(text, COMMANDS.menu)) {
-        const menuText = `🔸 *${BOT_NAME}* 🔸
-
-👤 *المستخدم:* @${senderNum}
-⚙️ *التشغيل:* ${formatUptime()}
-
-📋 *اختر قسم من القائمة:*`
-
-        try {
-          console.log('🔵 جاري إرسال الأزرار...')
-          const { sendInteractiveMessage } = await import('flowleys-helper')
-          console.log('🔵 flowleys-helper اتحمل')
-
-          await sendInteractiveMessage(sock, from, {
-            text: menuText,
-            footer: `${BOT_NAME} © 2026`,
-            interactiveButtons: [
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '📋 أوامر عامة', id: 'menu_general' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛡️ الإدارة', id: 'menu_admin' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎮 الألعاب', id: 'menu_games' }) },
-              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🛠️ الأدوات', id: 'menu_tools' }) }
-            ]
-          }, { quoted: msg })
-
-          console.log('✅ الأزرار اتبعتت')
-          return
-        } catch (e) {
-          console.log('❌ فشل إرسال الأزرار:', e.message)
-          return sock.sendMessage(from, { text: menuText + '\n\n📌 اكتب *ادمن* للمزيد' }, { quoted: msg })
-        }
-      }
-
-      // معالجة الأزرار
-      const buttonId = msg.message?.buttonsResponseMessage?.selectedButtonId
-        || msg.message?.templateButtonReplyMessage?.selectedId
-        || msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id
-
-      if (buttonId) {
-        let responseText = ''
-        if (buttonId === 'menu_general') responseText = '📋 *الأوامر العامة:*\n\n🔹 بينج\n🔹 المالك\n🔹 الوقت\n🔹 معلومات\n🔹 تنصيب\n🔹 تست'
-        else if (buttonId === 'menu_admin') responseText = getSectionContent('admin')
-        else if (buttonId === 'menu_games') responseText = '🎮 *الألعاب:*\n\n🔹 نرد\n🔹 تخمين\n🔹 حجر ورقة مقص'
-        else if (buttonId === 'menu_tools') responseText = '🛠️ *الأدوات:*\n\n🔹 زخرفة\n🔹 عكس\n🔹 حاسبة\n🔹 اقتباس\n🔹 نكتة\n🔹 هل تعلم'
-
-        if (responseText) return sock.sendMessage(from, { text: responseText }, { quoted: msg })
-      }
-
-      // ادمن
+      // ═══ ادمن ═══
       if (matchCommand(text, COMMANDS.admin_menu)) {
         return sock.sendMessage(from, { text: getSectionContent('admin') }, { quoted: msg })
       }
 
-      // اونر
+      // ═══ اونر ═══
       if (matchCommand(text, COMMANDS.owner_menu)) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         return sock.sendMessage(from, { text: getSectionContent('owner') }, { quoted: msg })
       }
 
-      // owner
+      // ═══ owner ═══
       if (matchCommand(text, COMMANDS.owner)) {
-        return sock.sendMessage(from, { text: `👑 *${OWNER_NAME}*\n🔗 ${OWNER_CONTACT}` }, { quoted: msg })
+        return sock.sendMessage(from, { text: `👑 *المالك:* ${OWNER_NAME}\n🔗 ${OWNER_CONTACT}` }, { quoted: msg })
       }
 
-      // time
+      // ═══ time ═══
       if (matchCommand(text, COMMANDS.time)) {
         const now = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })
-        return sock.sendMessage(from, { text: `🕐 ${now}` }, { quoted: msg })
+        return sock.sendMessage(from, { text: `🕐 *الوقت:* ${now}` }, { quoted: msg })
       }
 
-      // info
+      // ═══ info ═══
       if (matchCommand(text, COMMANDS.info)) {
         return sock.sendMessage(from, { text: `⚡ ${BOT_NAME}\n👑 ${OWNER_NAME}\n📊 بوتات: ${activeBots.size}\n⏱️ ${formatUptime()}` }, { quoted: msg })
       }
 
-      // تفعيل
+      // ═══ قائمة التفعيل ═══
       if (matchCommand(text, COMMANDS.activationMenu)) {
         const chat = global.db.data.chats[from] || {}
-        return sock.sendMessage(from, {
-          text: `🎛️ *الحماية*\n\n🚫 الروابط: ${chat.antilink ? '✅' : '❌'}\n🤬 الشتائم: ${chat.antibad ? '✅' : '❌'}\n📸 الاستوري: ${chat.antiviewonce ? '✅' : '❌'}`
-        }, { quoted: msg })
+        const menu = `╭━━━ ⚡ *𝑩𝑶𝑻 𝑫𝑨𝑹𝑲* ⚡ ━━━╮
+┃
+┃ 🎛️ *قائمة التفعيلات*
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 🛡️ *الحماية* ━━━╮
+┃
+┃ 🚫 منع الروابط: ${chat.antilink ? '✅' : '❌'}
+┃ 🤬 منع الشتائم: ${chat.antibad ? '✅' : '❌'}
+┃ 📸 منع الاستوري: ${chat.antiviewonce ? '✅' : '❌'}
+┃
+╰━━━━━━━━━━━━━━━╯
+
+╭━━━ 👋 *الترحيب* ━━━╮
+┃
+┃ 🎉 الترحيب: ${chat.welcome ? '✅' : '❌'}
+┃
+╰━━━━━━━━━━━━━━━╯`
+        return sock.sendMessage(from, { text: menu }, { quoted: msg })
       }
 
-      // أوامر الحماية
+      // ═══ الحماية (أوامر) ═══
       if (isGroup) {
         const userIsAdmin = isOwner || await isAdmin(sock, from, senderJid)
-        const chat = global.db.data.chats[from] || {}
 
-        if (matchCommand(text, COMMANDS.enableAntilink) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antilink', true)
-        if (matchCommand(text, COMMANDS.disableAntilink) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antilink', false)
-        if (matchCommand(text, COMMANDS.enableAntibad) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antibad', true)
-        if (matchCommand(text, COMMANDS.disableAntibad) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antibad', false)
-        if (matchCommand(text, COMMANDS.enableAntiviewonce) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', true)
-        if (matchCommand(text, COMMANDS.disableAntiviewonce) && userIsAdmin) return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', false)
+        if (matchCommand(text, COMMANDS.enableAntilink)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antilink', true)
+        }
+        if (matchCommand(text, COMMANDS.disableAntilink)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antilink', false)
+        }
+        if (matchCommand(text, COMMANDS.enableAntibad)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antibad', true)
+        }
+        if (matchCommand(text, COMMANDS.disableAntibad)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antibad', false)
+        }
+        if (matchCommand(text, COMMANDS.enableAntiviewonce)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', true)
+        }
+        if (matchCommand(text, COMMANDS.disableAntiviewonce)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', false)
+        }
+        if (matchCommand(text, COMMANDS.antilink)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antilink', !chat.antilink)
+        }
+        if (matchCommand(text, COMMANDS.antibad)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antibad', !chat.antibad)
+        }
+        if (matchCommand(text, COMMANDS.antiviewonce)) {
+          if (!userIsAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
+          const chat = global.db.data.chats[from] || {}
+          return toggleProtection(sock, from, msg, chat, global.db, 'antiviewonce', !chat.antiviewonce)
+        }
       }
 
-      // ألعاب
+      // ═══ الألعاب ═══
       if (matchCommand(text, COMMANDS.xo)) return playXO(sock, from, msg, senderJid, senderNum)
       if (matchCommand(text, COMMANDS.guess)) return playGuess(sock, from, msg, senderJid, senderNum)
       if (matchCommand(text, COMMANDS.rps)) return playRPS(sock, from, msg, senderJid, senderNum)
       if (matchCommand(text, COMMANDS.dice)) return playDice(sock, from, msg, senderJid, senderNum)
 
-      // تشغيل
-      if (text.trim().startsWith('تشغيل') || text.trim().startsWith('شغل ')) {
-        const query = text.replace(/^[.\/!#*]?\s*(تشغيل|شغل)\s*/, '').trim()
+      // ═══ تشغيل ═══
+      if (text.trim().startsWith('تشغيل') || text.trim().startsWith('شغل ') || text.trim().startsWith('play ')) {
+        const query = text.replace(/^[.\/!#*]?\s*(تشغيل|شغل|play)\s*/, '').trim()
         if (query.length >= 2) return playMusic(sock, from, msg, query)
       }
 
-      // بحث
-      if (text.trim().startsWith('بحث')) {
-        const query = text.replace(/^[.\/!#*]?\s*بحث\s*/, '').trim()
+      // ═══ بحث ═══
+      if (text.trim().startsWith('بحث') || text.trim().startsWith('search ')) {
+        const query = text.replace(/^[.\/!#*]?\s*(بحث|search)\s*/, '').trim()
         if (query.length >= 2) return searchMusic(sock, from, msg, query)
       }
 
-      // ذكاء
-      if (text.trim().startsWith('ذكاء')) {
-        const question = text.replace(/^[.\/!#*]?\s*ذكاء\s*/, '').trim()
+      // ═══ ذكاء ═══
+      if (text.trim().startsWith('ذكاء') || text.trim().startsWith('ai ') || text.trim().startsWith('اسأل')) {
+        const question = text.replace(/^[.\/!#*]?\s*(ذكاء|ai|اسأل)\s*/, '').trim()
         if (question.length >= 2) return askAI(sock, from, msg, question)
       }
 
-      // صوره
-      if (text.trim().startsWith('صوره')) {
-        const prompt = text.replace(/^[.\/!#*]?\s*صوره\s*/, '').trim()
+      // ═══ صوره ═══
+      if (text.trim().startsWith('صوره') || text.trim().startsWith('image ') || text.trim().startsWith('img ')) {
+        const prompt = text.replace(/^[.\/!#*]?\s*(صوره|image|img)\s*/, '').trim()
         if (prompt.length >= 2) return generateImage(sock, from, msg, prompt)
       }
 
-      // زخرفة
-      if (text.trim().startsWith('زخرفة')) {
-        const t = text.replace(/^[.\/!#*]?\s*زخرفة\s*/, '').trim()
+      // ═══ زخرفة ═══
+      if (text.trim().startsWith('زخرفة') || text.trim().startsWith('decorate ')) {
+        const t = text.replace(/^[.\/!#*]?\s*(زخرفة|decorate)\s*/, '').trim()
         if (t.length >= 1) return decorateText(sock, from, msg, t)
       }
 
-      // عكس
-      if (text.trim().startsWith('عكس')) {
-        const t = text.replace(/^[.\/!#*]?\s*عكس\s*/, '').trim()
+      // ═══ عكس ═══
+      if (text.trim().startsWith('عكس') || text.trim().startsWith('reverse ')) {
+        const t = text.replace(/^[.\/!#*]?\s*(عكس|reverse)\s*/, '').trim()
         if (t.length >= 1) return reverseText(sock, from, msg, t)
       }
 
-      // حاسبة
-      if (text.trim().startsWith('حاسبة') || text.trim().startsWith('احسب')) {
-        const t = text.replace(/^[.\/!#*]?\s*(حاسبة|احسب)\s*/, '').trim()
+      // ═══ حاسبة ═══
+      if (text.trim().startsWith('حاسبة') || text.trim().startsWith('احسب') || text.trim().startsWith('calc ')) {
+        const t = text.replace(/^[.\/!#*]?\s*(حاسبة|احسب|calc)\s*/, '').trim()
         if (t.length >= 1) return calcExpression(sock, from, msg, t)
       }
 
-      // اقتباس
+      // ═══ اقتباس ═══
       if (matchCommand(text, COMMANDS.quote)) return randomQuote(sock, from, msg)
+
+      // ═══ نكتة ═══
       if (matchCommand(text, COMMANDS.joke)) return randomJoke(sock, from, msg)
+
+      // ═══ هل تعلم ═══
       if (matchCommand(text, COMMANDS.fact)) return randomFact(sock, from, msg)
 
-      // فضح
+      // ═══ فضح ═══
       if (matchCommand(text, COMMANDS.expose) && isGroup) return exposeMedia(sock, from, msg, senderJid)
 
-      // مسح
+      // ═══ مسح ═══
       if (matchCommand(text, COMMANDS.clear)) {
         const isUserAdmin = isOwner || (isGroup && await isAdmin(sock, from, senderJid))
         if (!isUserAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
@@ -363,30 +484,42 @@ async function startBot() {
         return sock.sendMessage(from, { text: '❌ رد على رسالة عشان تمسحها' }, { quoted: msg })
       }
 
-      // مسح الكل
+      // ═══ مسح الكل ═══
       if (matchCommand(text, COMMANDS.clearAll)) {
         const isUserAdmin = isOwner || (isGroup && await isAdmin(sock, from, senderJid))
         if (!isUserAdmin) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
 
-        const msgs = global.botMessages?.[from] || []
+        const messages = global.botMessages?.[from] || []
         let deleted = 0
-        for (const m of msgs) {
-          try { await sock.sendMessage(from, { delete: m.key }); deleted++ } catch (e) {}
+        for (const m of messages) {
+          try {
+            await sock.sendMessage(from, { delete: m.key })
+            deleted++
+          } catch (e) {}
         }
         global.botMessages[from] = []
-        return sock.sendMessage(from, { text: `✅ تم مسح ${deleted} رسالة` }, { quoted: msg })
+        return sock.sendMessage(from, { text: `✅ *تم مسح ${deleted} رسالة*` }, { quoted: msg })
       }
 
-      // تنصيب
+      // ═══ تنصيب ═══
       if (matchCommand(text, COMMANDS.install)) {
-        if (!installOpen && !isOwner) return sock.sendMessage(from, { text: '🔒 التنصيب مقفول' }, { quoted: msg })
-
-        const lastReq = global.installCooldown.get(from) || 0
-        if (Date.now() - lastReq < 50000 && !isOwner) {
-          const rem = Math.ceil((50000 - (Date.now() - lastReq)) / 1000)
-          return sock.sendMessage(from, { text: `⏳ استنى ${rem} ثانية` }, { quoted: msg })
+        if (!installOpen && !isOwner) {
+          return sock.sendMessage(from, { text: `🔒 *التنصيب مقفول*` }, { quoted: msg })
         }
-        global.installCooldown.set(from, Date.now())
+
+        // ✅ cooldown
+        const lastRequest = global.installCooldown.get(from) || 0
+        const now = Date.now()
+        const cooldownTime = 50000
+
+        if (now - lastRequest < cooldownTime && !isOwner) {
+          const remaining = Math.ceil((cooldownTime - (now - lastRequest)) / 1000)
+          return sock.sendMessage(from, {
+            text: `⏳ *استنى ${remaining} ثانية*\n\nمش هينفع تطلب كود تاني بسرعة`
+          }, { quoted: msg })
+        }
+
+        global.installCooldown.set(from, now)
 
         await sock.sendMessage(from, {
           text: `📱 *تنصيب بوت جديد*\n\nابعت رقمك مع كود الدولة\n⚠️ بدون + وبدون 0`
@@ -395,7 +528,6 @@ async function startBot() {
         return
       }
 
-      // رقم للتنصيب
       const pending = pendingCodes.get(from)
       if (pending && pending.step === 'awaiting_number') {
         const number = text.replace(/[^0-9]/g, '')
@@ -412,19 +544,19 @@ async function startBot() {
         return
       }
 
-      // فتح/قفل
+      // ═══ فتح/قفل ═══
       if (cmdText === 'فتح تنصيب') {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         installOpen = true
-        return sock.sendMessage(from, { text: '✅ تم فتح التنصيب' }, { quoted: msg })
+        return sock.sendMessage(from, { text: '✅ *تم فتح التنصيب*' }, { quoted: msg })
       }
       if (cmdText === 'قفل تنصيب') {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         installOpen = false
-        return sock.sendMessage(from, { text: '🔒 تم قفل التنصيب' }, { quoted: msg })
+        return sock.sendMessage(from, { text: '🔒 *تم قفل التنصيب*' }, { quoted: msg })
       }
 
-      // كتم
+      // ═══ كتم ═══
       if (matchCommand(text, COMMANDS.mute_member)) {
         const a = isOwner || (isGroup && await isAdmin(sock, from, senderJid))
         if (!a) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
@@ -433,29 +565,34 @@ async function startBot() {
         const targetNum = target.split('@')[0].split(':')[0]
         if (targetNum === OWNER_NUMBER) return sock.sendMessage(from, { text: '❌ المالك مستثنى' }, { quoted: msg })
         global.mutedUsers.set(target, { by: senderJid, time: Date.now() })
-        return sock.sendMessage(from, { text: `✅ تم كتم @${targetNum}`, mentions: [target] }, { quoted: msg })
+        return sock.sendMessage(from, { text: `✅ *تم كتم @${targetNum}*`, mentions: [target] }, { quoted: msg })
       }
 
-      // فك كتم
+      // ═══ فك كتم ═══
       if (matchCommand(text, COMMANDS.unmute_member)) {
         const a = isOwner || (isGroup && await isAdmin(sock, from, senderJid))
         if (!a) return sock.sendMessage(from, { text: '❌ للمشرفين بس' }, { quoted: msg })
         const target = getMentioned(msg)
         if (!target) return sock.sendMessage(from, { text: '❌ اعمل منشن' }, { quoted: msg })
         global.mutedUsers.delete(target)
-        return sock.sendMessage(from, { text: `✅ تم فك الكتم`, mentions: [target] }, { quoted: msg })
+        return sock.sendMessage(from, { text: `✅ *تم فك الكتم*`, mentions: [target] }, { quoted: msg })
       }
 
-      // المكتومين
+      // ═══ المكتومين ═══
       if (matchCommand(text, COMMANDS.mutedList)) {
-        if (global.mutedUsers.size === 0) return sock.sendMessage(from, { text: '📭 مفيش حد مكتوم' }, { quoted: msg })
-        let list = '🤐 المكتومين:\n\n'
+        if (global.mutedUsers.size === 0) {
+          return sock.sendMessage(from, { text: '📭 مفيش حد مكتوم' }, { quoted: msg })
+        }
+        let list = '🤐 *المكتومين:*\n\n'
         let i = 1
-        for (const [jid] of global.mutedUsers) { list += `${i}. @${jid.split('@')[0]}\n`; i++ }
+        for (const [jid] of global.mutedUsers) {
+          list += `${i}. @${jid.split('@')[0]}\n`
+          i++
+        }
         return sock.sendMessage(from, { text: list, mentions: Array.from(global.mutedUsers.keys()) }, { quoted: msg })
       }
 
-      // الترحيب
+      // ═══ الترحيب ═══
       if (matchCommand(text, COMMANDS.onWelcome) && isGroup) {
         const a = isOwner || await isAdmin(sock, from, senderJid)
         if (a) return handleWelcomeToggle(sock, from, msg, true, global.db)
@@ -465,7 +602,7 @@ async function startBot() {
         if (a) return handleWelcomeToggle(sock, from, msg, false, global.db)
       }
 
-      // أوامر الإدارة
+      // ═══ أوامر الإدارة ═══
       if (isGroup) {
         const userIsAdmin = isOwner || await isAdmin(sock, from, senderJid)
         const botIsAdmin = await isBotAdmin(sock, from)
@@ -481,7 +618,7 @@ async function startBot() {
         if (matchCommand(text, COMMANDS.groupInfo)) return groupInfo(sock, from, msg)
       }
 
-      // اضف فرعي
+      // ═══ اضف فرعي ═══
       if (matchCommand(text, COMMANDS.addSubBot)) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         const target = getMentioned(msg)
@@ -489,10 +626,11 @@ async function startBot() {
         const targetNum = target.split('@')[0].split(':')[0]
         global.authorizedUsers.add(targetNum)
         global.authorizedUsers.add(target)
-        return sock.sendMessage(from, { text: `✅ تم اضافة @${targetNum}`, mentions: [target] }, { quoted: msg })
+        saveAuthorized()
+        return sock.sendMessage(from, { text: `✅ *تم اضافة الفرعي*`, mentions: [target] }, { quoted: msg })
       }
 
-      // امسح فرعي
+      // ═══ امسح فرعي ═══
       if (matchCommand(text, COMMANDS.removeSubBot)) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         const target = getMentioned(msg)
@@ -500,27 +638,48 @@ async function startBot() {
         const targetNum = target.split('@')[0].split(':')[0]
         global.authorizedUsers.delete(targetNum)
         global.authorizedUsers.delete(target)
-        return sock.sendMessage(from, { text: `✅ تم مسح @${targetNum}`, mentions: [target] }, { quoted: msg })
+        saveAuthorized()
+        return sock.sendMessage(from, { text: `✅ *تم مسح الفرعي*`, mentions: [target] }, { quoted: msg })
       }
 
-      // البوتات
-      if (matchCommand(text, COMMANDS.bots)) {
+      // ═══ الفروع ═══
+      if (matchCommand(text, COMMANDS.subBotsList)) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
-        if (activeBots.size === 0) return sock.sendMessage(from, { text: '📭 مفيش بوتات' }, { quoted: msg })
-        let list = '📋 البوتات:\n\n'
+        if (global.authorizedUsers.size === 0) {
+          return sock.sendMessage(from, { text: '📭 مفيش فروع' }, { quoted: msg })
+        }
+        let list = '📋 *الفروع:*\n\n'
         let i = 1
-        for (const [num] of activeBots) { list += `${i}. ${num}\n`; i++ }
+        for (const u of global.authorizedUsers) {
+          list += `${i}. \`${u}\`\n`
+          i++
+        }
         return sock.sendMessage(from, { text: list }, { quoted: msg })
       }
 
-      // الغاء
+      // ═══ البوتات ═══
+      if (matchCommand(text, COMMANDS.bots)) {
+        if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
+        if (activeBots.size === 0) {
+          return sock.sendMessage(from, { text: '📭 مفيش بوتات' }, { quoted: msg })
+        }
+        let list = '📋 *البوتات:*\n\n'
+        let i = 1
+        for (const [num] of activeBots) {
+          list += `${i}. \`${num}\`\n`
+          i++
+        }
+        return sock.sendMessage(from, { text: list }, { quoted: msg })
+      }
+
+      // ═══ الغاء ═══
       if (matchCommand(text, COMMANDS.cancel)) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         pendingCodes.delete(from)
         return sock.sendMessage(from, { text: '✅ تم الإلغاء' }, { quoted: msg })
       }
 
-      // قول
+      // ═══ قول ═══
       if (cmdText.startsWith('say ') || cmdText.startsWith('قول ')) {
         if (!isOwner) return sock.sendMessage(from, { text: NOT_OWNER_MSG }, { quoted: msg })
         const sayText = cmdText.replace(/^(say|قول)\s+/, '')
@@ -559,9 +718,16 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
   subSock.ev.on('creds.update', saveCreds)
 
   let codeSent = false
+  let qrSent = false
 
   subSock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update
+    const { connection, lastDisconnect, qr } = update
+
+    if (qr && !subSock.authState.creds.registered && !qrSent) {
+      qrSent = true
+      console.log(`\n📱 QR للبوت الفرعي: ${phoneNumber}\n`)
+      qrcode.generate(qr, { small: true })
+    }
 
     if (connection === 'close') {
       const reason = new Boom(lastDisconnect?.error)?.output?.statusCode
@@ -595,18 +761,21 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
       console.log(`🔑 طلب كود لـ ${phoneNumber}...`)
 
       const lastSub = global.subBotCooldown.get(phoneNumber) || 0
-      if (Date.now() - lastSub < 50000) {
+      const now = Date.now()
+
+      if (now - lastSub < 50000) {
         console.log(`⏳ ${phoneNumber} في cooldown`)
         return
       }
-      global.subBotCooldown.set(phoneNumber, Date.now())
+
+      global.subBotCooldown.set(phoneNumber, now)
 
       const code = await subSock.requestPairingCode(phoneNumber)
       const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code
       console.log(`✅ كود ${phoneNumber}: ${formattedCode}`)
 
       await mainSock.sendMessage(requesterJid, {
-        text: `╭━━━ ⚡ *${BOT_NAME}* ⚡ ━━━╮
+        text: `╭━━━ ⚡ *𝑩𝑶𝑻 𝑫𝑨𝑹𝑲* ⚡ ━━━╮
 ┃
 ┃ 🔑 *كود الإقران:*
 ┃
@@ -626,7 +795,7 @@ async function createSubBot(phoneNumber, requesterJid, mainSock) {
         text: `❌ *فشل إنشاء الكود*\n\n⚠️ جرب تاني بعد 15 دقيقة`
       }).catch(() => {})
     }
-  }, 10000)
+  }, 5000)
 }
 
 // ═══════════════════════════════════════════════════════
