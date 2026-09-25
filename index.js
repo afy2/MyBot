@@ -6,7 +6,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion
-} from '@whiskeysockets/baileys'
+} from '@itsukichann/baileys'
 import { Boom } from '@hapi/boom'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
